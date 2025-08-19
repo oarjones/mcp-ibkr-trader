@@ -3,6 +3,8 @@ from mcp_server.main import app
 from datetime import datetime, timedelta
 
 client = TestClient(app)
+api_key = "your-secret-api-key"
+headers = {"X-API-Key": api_key}
 
 def test_get_bars_success():
     start = datetime.now() - timedelta(days=1)
@@ -16,6 +18,7 @@ def test_get_bars_success():
             "start": start.isoformat(),
             "end": end.isoformat(),
         },
+        headers=headers,
     )
     assert response.status_code == 200
     data = response.json()
@@ -34,6 +37,7 @@ def test_get_bars_invalid_symbol():
             "start": start.isoformat(),
             "end": end.isoformat(),
         },
+        headers=headers,
     )
     assert response.status_code == 422
 
@@ -49,5 +53,6 @@ def test_get_bars_invalid_date_range():
             "start": start.isoformat(),
             "end": end.isoformat(),
         },
+        headers=headers,
     )
     assert response.status_code == 400

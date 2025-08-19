@@ -1,13 +1,40 @@
 import time
 import uuid
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, Depends, HTTPException
+from fastapi.security import APIKeyHeader
+from starlette.responses import JSONResponse
 from mcp_server.tools import market_data, orders, portfolio, pdt_guard, risk
+from mcp_server.tools.utils import load_config
+
+config = load_config()
+API_KEY = config.get("api_key")
+API_KEY_NAME = "X-API-Key"
+
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def get_api_key(api_key: str = Depends(api_key_header)):
+    if API_KEY and api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    return api_key
 
 app = FastAPI(
     title="mcp-ibkr-trader",
     description="Autonomous trading system connecting a Master Control Program (MCP) server with Interactive Brokers Gateway.",
     version="0.1.0",
+    dependencies=[Depends(get_api_key)] if API_KEY else []
 )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": "HTTP_EXCEPTION",
+                "message": exc.detail,
+            }
+        },
+    )
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):

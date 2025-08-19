@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
+import random
 
 router = APIRouter()
 
@@ -45,16 +46,47 @@ class MarketDataResponse(BaseModel):
     bars: list[Bar]
     meta: dict
 
+def get_timeframe_delta(tf: TimeframeEnum):
+    if tf == TimeframeEnum.min1:
+        return timedelta(minutes=1)
+    elif tf == TimeframeEnum.min5:
+        return timedelta(minutes=5)
+    elif tf == TimeframeEnum.min15:
+        return timedelta(minutes=15)
+    elif tf == TimeframeEnum.day1:
+        return timedelta(days=1)
+
 @router.post("/tool/market_data.get_bars", response_model=MarketDataResponse)
 async def get_bars(request: MarketDataRequest):
     # Mock implementation
     if request.start >= request.end:
         raise HTTPException(status_code=400, detail="start must be before end")
 
-    bars = [
-        Bar(t=request.start, o=1.0, h=1.1, l=0.9, c=1.05, v=100),
-        Bar(t=request.end, o=1.05, h=1.15, l=1.0, c=1.1, v=120),
-    ]
+    bars = []
+    current_time = request.start
+    time_delta = get_timeframe_delta(request.tf)
+    
+    # Seed the random number generator for deterministic results
+    seed = f"{request.symbol}-{request.tf}-{request.start}"
+    rng = random.Random(seed)
+
+    while current_time < request.end:
+        open_price = rng.uniform(1.0, 100.0)
+        close_price = open_price + rng.uniform(-0.5, 0.5)
+        high_price = max(open_price, close_price) + rng.uniform(0.0, 0.2)
+        low_price = min(open_price, close_price) - rng.uniform(0.0, 0.2)
+        volume = rng.randint(100, 1000)
+        
+        bars.append(Bar(
+            t=current_time,
+            o=open_price,
+            h=high_price,
+            l=low_price,
+            c=close_price,
+            v=volume
+        ))
+        current_time += time_delta
+
     return MarketDataResponse(
         symbol=request.symbol,
         tf=request.tf,

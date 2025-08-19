@@ -1,43 +1,19 @@
-timezone: "Europe/Madrid"
-ibkr:
-  adapter: "tws"       # IB Gateway/TWS
-  host: "127.0.0.1"
-  port: 4002           # Paper: 4002 (TWS paper: 7497)
-  client_id: 101
-  account: "DUXXXXXX"
-  read_only_api: true
-  connect_timeout_sec: 10
-  reconnect:
-    enabled: true
-    max_attempts: 0          # 0=infinito
-    initial_backoff_sec: 1
-    max_backoff_sec: 30
-  market_data:
-    what_to_show: "TRADES"   # TRADES/MIDPOINT/BID_ASK
-    rtb_enabled: true        # RealTimeBars (5s)
-    hist_defaults:
-      bar_size: "1 min"
-      duration: "1 D"
-      outside_rth: false
-risk:
-  risk_per_trade_pct: 0.01
+# IB Gateway configuration
+ib_gateway:
+  host: 127.0.0.1
+  port: 4002
+  client_id: 1
+  account: "DU1234567"
+
+# Application settings
+dry_run: True
+markets_enabled: ["FX", "FUT", "CRYPTO", "STK", "OPT"]
+scheduler_windows:
+  - {start: "08:00", end: "16:00"}
+risk_limits:
   max_daily_loss_pct: 0.05
-  max_consecutive_losses: 3
-pdt:
-  enabled: true
-markets_enabled: ["FX","FUT","CRYPTO","STK","OPT"]
-scheduler:
-  windows:
-    FX: ["07:00-11:30","14:00-18:00"]
-    FUT: ["15:30-22:00"]
-    CRYPTO: ["00:00-23:59"]
-    STK: ["15:30-22:00"]   # swing hasta >25k
-storage:
-  db_url: "sqlite:///./trader.db"
-paper:
-  enabled: true
-  symbols:
-    FX: ["EUR.USD","GBP.USD","USD.JPY"]
-    FUT: ["MES","MGC"]
-    CRYPTO: ["BTC","ETH"]
-    STK: ["AAPL","MSFT","NVDA"]
+  risk_per_trade_pct: 0.01
+pdt_enabled: True
+
+# Security
+api_key: "your-secret-api-key"

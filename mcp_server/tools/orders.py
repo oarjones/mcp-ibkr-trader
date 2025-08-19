@@ -2,8 +2,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from enum import Enum
 from typing import Optional
+from mcp_server.tools.utils import deterministic_id
 
 router = APIRouter()
+
+# In-memory store for idempotency
+idempotency_store = {}
 
 class AssetTypeEnum(str, Enum):
     stk = "STK"
@@ -64,6 +68,10 @@ class PlaceBracketResponse(BaseModel):
 
 @router.post("/tool/orders.place_bracket", response_model=PlaceBracketResponse)
 async def place_bracket(request: PlaceBracketRequest):
+    if request.plan_id in idempotency_store:
+        idempotency_store[request.plan_id].status = "DUPLICATE"
+        return idempotency_store[request.plan_id]
+
     if request.qty <= 0:
         raise HTTPException(status_code=422, detail="qty must be positive")
     if request.side == SideEnum.buy:
@@ -80,10 +88,18 @@ async def place_bracket(request: PlaceBracketRequest):
         raise HTTPException(status_code=409, detail="requires_approval is not supported in this module")
 
     # Mock implementation
-    return PlaceBracketResponse(
+    parent_id = deterministic_id(request.plan_id, "SIM-ORD")
+    tp_id = deterministic_id(request.plan_id, "SIM-TP")
+    sl_id = deterministic_id(request.plan_id, "SIM-SL")
+    
+    response = PlaceBracketResponse(
         plan_id=request.plan_id,
-        parent_id="SIM-ORD-123",
-        children_ids=["SIM-TP-456", "SIM-SL-789"],
+        parent_id=parent_id,
+        children_ids=[tp_id, sl_id],
         status="ACCEPTED",
         dry_run=True,
     )
+
+    idempotency_store[request.plan_id] = response
+    
+    return response
