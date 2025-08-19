@@ -1,1 +1,43 @@
-{}
+{
+  "title": "Risk Tool",
+  "description": "Tool for pre-trade risk checks.",
+  "type": "object",
+  "properties": {
+    "pre_trade_check": {
+      "title": "Pre-Trade Check",
+      "description": "Perform pre-trade risk checks.",
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "object",
+          "properties": {
+            "symbol": { "type": "string" },
+            "asset_type": { "enum": ["STK", "FX", "FUT", "CRYPTO", "OPT"] },
+            "qty": { "type": "integer" },
+            "plan": {
+              "type": "object",
+              "properties": {
+                "entry": { "type": "object" },
+                "stop": { "type": "object" },
+                "take": { "type": "object" }
+              },
+              "required": ["entry", "stop", "take"]
+            }
+          },
+          "required": ["symbol", "asset_type", "qty", "plan"]
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean" },
+            "reasons": { "type": "array", "items": { "type": "string" } },
+            "allowed_qty": { "type": "integer" },
+            "policy": { "type": "object" },
+            "dry_run": { "type": "boolean" }
+          },
+          "required": ["ok", "reasons", "allowed_qty", "policy", "dry_run"]
+        }
+      }
+    }
+  }
+}

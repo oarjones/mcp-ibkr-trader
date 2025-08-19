@@ -1,1 +1,63 @@
-{}
+{
+  "title": "Orders Tool",
+  "description": "Tool for placing and managing orders.",
+  "type": "object",
+  "properties": {
+    "place_bracket": {
+      "title": "Place Bracket Order",
+      "description": "Place a bracket order with entry, stop, and take profit.",
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "object",
+          "properties": {
+            "plan_id": { "type": "string" },
+            "account": { "type": "string" },
+            "symbol": { "type": "string" },
+            "asset_type": { "enum": ["STK", "FX", "FUT", "CRYPTO", "OPT"] },
+            "qty": { "type": "integer" },
+            "side": { "enum": ["BUY", "SELL"] },
+            "entry": {
+              "type": "object",
+              "properties": {
+                "type": { "enum": ["LMT", "MKT"] },
+                "price": { "type": "number" }
+              },
+              "required": ["type"]
+            },
+            "stop": {
+              "type": "object",
+              "properties": {
+                "type": { "enum": ["STP"] },
+                "stop_price": { "type": "number" }
+              },
+              "required": ["type", "stop_price"]
+            },
+            "take": {
+              "type": "object",
+              "properties": {
+                "type": { "enum": ["LMT"] },
+                "price": { "type": "number" }
+              },
+              "required": ["type", "price"]
+            },
+            "tif": { "enum": ["DAY", "GTC"] },
+            "requires_approval": { "type": "boolean" }
+          },
+          "required": ["plan_id", "account", "symbol", "asset_type", "qty", "side", "entry", "stop", "take", "tif"]
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "plan_id": { "type": "string" },
+            "parent_id": { "type": "string" },
+            "children_ids": { "type": "array", "items": { "type": "string" } },
+            "status": { "type": "string" },
+            "dry_run": { "type": "boolean" }
+          },
+          "required": ["plan_id", "parent_id", "children_ids", "status", "dry_run"]
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,53 @@
-import pytest
+from fastapi.testclient import TestClient
+from mcp_server.main import app
+from datetime import datetime, timedelta
 
-def test_market_data_import():
-    from mcp_server.tools import market_data
+client = TestClient(app)
 
-def test_always_passes():
-    assert True
+def test_get_bars_success():
+    start = datetime.now() - timedelta(days=1)
+    end = datetime.now()
+    response = client.post(
+        "/tool/market_data.get_bars",
+        json={
+            "symbol": "EUR.USD",
+            "asset_type": "FX",
+            "tf": "1m",
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["symbol"] == "EUR.USD"
+    assert data["tf"] == "1m"
+    assert len(data["bars"]) > 0
+
+def test_get_bars_invalid_symbol():
+    start = datetime.now() - timedelta(days=1)
+    end = datetime.now()
+    response = client.post(
+        "/tool/market_data.get_bars",
+        json={
+            "asset_type": "FX",
+            "tf": "1m",
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        },
+    )
+    assert response.status_code == 422
+
+def test_get_bars_invalid_date_range():
+    start = datetime.now()
+    end = datetime.now() - timedelta(days=1)
+    response = client.post(
+        "/tool/market_data.get_bars",
+        json={
+            "symbol": "EUR.USD",
+            "asset_type": "FX",
+            "tf": "1m",
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        },
+    )
+    assert response.status_code == 400

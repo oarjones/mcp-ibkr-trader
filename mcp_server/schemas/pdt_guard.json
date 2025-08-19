@@ -1,1 +1,33 @@
-{}
+{
+  "title": "PDT Guard Tool",
+  "description": "Tool for checking Pattern Day Trading rules.",
+  "type": "object",
+  "properties": {
+    "validate": {
+      "title": "Validate Trade",
+      "description": "Validate if a trade is allowed under PDT rules.",
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "object",
+          "properties": {
+            "symbol": { "type": "string" },
+            "asset_type": { "enum": ["STK", "FX", "FUT", "CRYPTO", "OPT"] },
+            "side": { "enum": ["BUY", "SELL"] },
+            "is_intraday": { "type": "boolean" }
+          },
+          "required": ["symbol", "asset_type", "side", "is_intraday"]
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean" },
+            "remaining_intraday_trades": { "type": "integer" },
+            "note": { "type": "string" }
+          },
+          "required": ["ok", "remaining_intraday_trades", "note"]
+        }
+      }
+    }
+  }
+}

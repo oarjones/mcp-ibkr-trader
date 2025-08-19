@@ -1,1 +1,50 @@
-{}
+{
+  "title": "Market Data Tool",
+  "description": "Tool for retrieving market data.",
+  "type": "object",
+  "properties": {
+    "get_bars": {
+      "title": "Get Bars",
+      "description": "Get historical bar data.",
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "object",
+          "properties": {
+            "symbol": { "type": "string" },
+            "asset_type": { "enum": ["STK", "FX", "FUT", "CRYPTO", "OPT"] },
+            "tf": { "enum": ["1m", "5m", "15m", "1d"] },
+            "start": { "type": "string", "format": "date-time" },
+            "end": { "type": "string", "format": "date-time" },
+            "what_to_show": { "enum": ["TRADES", "MIDPOINT", "BID_ASK"] }
+          },
+          "required": ["symbol", "asset_type", "tf", "start", "end"]
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "symbol": { "type": "string" },
+            "tf": { "enum": ["1m", "5m", "15m", "1d"] },
+            "bars": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "t": { "type": "string", "format": "date-time" },
+                  "o": { "type": "number" },
+                  "h": { "type": "number" },
+                  "l": { "type": "number" },
+                  "c": { "type": "number" },
+                  "v": { "type": "integer" }
+                },
+                "required": ["t", "o", "h", "l", "c", "v"]
+              }
+            },
+            "meta": { "type": "object" }
+          },
+          "required": ["symbol", "tf", "bars", "meta"]
+        }
+      }
+    }
+  }
+}
