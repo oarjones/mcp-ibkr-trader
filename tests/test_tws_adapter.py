@@ -20,6 +20,24 @@ def test_get_positions_dry_run():
     assert isinstance(positions, list)
     assert len(positions) > 0
 
+def test_get_bars_parses_dates():
+    """
+    Tests if the 'ts' column in the DataFrame returned by get_bars is of datetime64 type.
+    """
+    adapter = TWSAdapter() # dry_run is True by default
+    df = adapter.get_bars("AAPL", "1m", "2025-01-01 09:00:00", "2025-01-01 09:10:00")
+    assert df['ts'].dtype == 'datetime64[ns]'
+
+def test_get_bars_dry_run_deterministic():
+    """
+    Tests if get_bars in dry_run mode returns the same DataFrame for the same inputs.
+    """
+    adapter = TWSAdapter() # dry_run is True by default
+    df1 = adapter.get_bars("MSFT", "5m", "2025-02-01 10:00:00", "2025-02-01 10:10:00")
+    df2 = adapter.get_bars("MSFT", "5m", "2025-02-01 10:00:00", "2025-02-01 10:10:00")
+    pd.testing.assert_frame_equal(df1, df2)
+
+
 # To run live tests, set dry_run to false in config.example.yaml
 # and ensure IB Gateway is running.
 # @pytest.mark.live
