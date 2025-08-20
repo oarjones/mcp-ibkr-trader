@@ -45,6 +45,22 @@
           "required": ["symbol", "tf", "bars", "meta"]
         }
       }
+    },
+    "RealtimeMarketData": {
+      "title": "Realtime Market Data",
+      "description": "Real-time market data update.",
+      "type": "object",
+      "properties": {
+        "symbol": { "type": "string" },
+        "price": { "type": "number" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "order_id": {
+          "type": "integer",
+          "description": "Identificador único de la orden asociada a los datos de mercado.",
+          "optional": true
+        }
+      },
+      "required": ["symbol", "price", "timestamp"]
     }
   }
 }

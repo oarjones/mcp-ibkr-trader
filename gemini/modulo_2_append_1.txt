@@ -1,0 +1,178 @@
+Contexto del proyecto (léelo antes de programar)
+
+Estamos construyendo mcp-ibkr-trader, un sistema de trading autónomo que conecta un servidor MCP con Interactive Brokers vía IB Gateway (ibapi).
+
+Capital inicial: 4.000 €.
+
+Objetivo: maximizar beneficios y reinvertir hasta superar la restricción de Pattern Day Trading (PDT); después, ampliar intradía en acciones/opciones.
+
+Operación multi-mercado: FX, micro-futuros, cripto (si aplica), acciones/ETFs, opciones.
+
+“Backtesting” = forward testing real en IBKR Paper (Data Factory para entrenar, más adelante, un agente RL tipo PPO en modo shadow/canary).
+
+Guardarraíles: riesgo por ATR, límites de exposición, PDT guard, kill switch, ventanas horarias, whitelists, idempotencia de órdenes.
+
+Config por YAML/ENV, DRY_RUN para desarrollo sin Gateway activo.
+
+Repo (ramas principales): main. Proyecto: mcp-ibkr-trader.
+
+✅ Estado actual (Módulos completados)
+Módulo 0 — Bootstrap + GitHub + CI + Config
+
+Estructura de carpetas creada.
+
+requirements.txt, config.example.yaml, storage/db.py base.
+
+Guía IB Gateway (Paper puerto 4002).
+
+CI simple (tests).
+
+Módulo 1 — Servidor MCP (FastAPI)
+
+Endpoints POST:
+
+/tool/market_data.get_bars
+
+/tool/orders.place_bracket
+
+/tool/portfolio.get_positions
+
+/tool/risk.pre_trade_check
+
+/tool/pdt_guard.validate
+
+Validación Pydantic; mocks deterministas con dry_run; health/version; correlation-id y logging loguru.
+
+Módulo 2 — Adaptador TWS/Gateway (ibapi)
+
+TWSClient(EWrapper,EClient) + loop en hilo, IDs thread-safe, colas por reqId, timeouts.
+
+TWSAdapter: get_bars, place_bracket_order, get_positions.
+
+Mapeo tf → (barSize, duration); parseo correcto de historicalData; helper bracket con transmit correcto; mapping.resolve_contract (STK/FX/FUT/CRYPTO).
+
+DRY_RUN soportado (datos/IDs deterministas)
+
+
+
+Ahora necesito que implementes estos detalles a pulir antes del Módulo 3
+
+Pacing rules (históricos)
+Ahora mismo no veo un “guard” que imponga ~2s entre reqHistoricalData por contrato. Añade un pequeño paceador para evitar errores 321/farm:
+
+# tws_client.py (ámbito módulo)
+_hist_lock = threading.Lock()
+_last_hist = 0.0
+
+def _pace_hist(min_gap=2.0):
+    global _last_hist
+    with _hist_lock:
+        now = time.time()
+        delay = _last_hist + min_gap - now
+        if delay > 0:
+            time.sleep(delay)
+        _last_hist = time.time()
+
+
+y llama a _pace_hist() justo antes de reqHistoricalData(...).
+
+historicalDataEnd: no “monkey-patch”
+El wrapper temporal sobre self.historicalDataEnd funciona, pero es frágil si hay varias peticiones concurrentes. Mejor un diccionario de eventos por reqId:
+
+# tws_client.py
+self._end_events = {}  # reqId -> threading.Event
+
+def get_historical_data(...):
+    reqId = self._next_req_id()
+    q = self.get_response_queue(reqId)
+    done = threading.Event()
+    self._end_events[reqId] = done
+    self.reqHistoricalData(...)
+    start = time.time()
+    while True:
+        if done.is_set(): break
+        remaining = timeout - (time.time() - start)
+        if remaining <= 0:
+            self.cancelHistoricalData(reqId); raise TimeoutError(...)
+        try:
+            item = q.get(timeout=min(remaining, 0.25))
+            bars.append(item)
+        except Empty:
+            pass
+    del self._end_events[reqId]
+    return bars
+
+def historicalDataEnd(self, reqId, start, end):
+    self.get_response_queue(reqId)  # ensure queue exists
+    ev = self._end_events.get(reqId)
+    if ev: ev.set()
+
+
+(Con esto soportas múltiples reqId simultáneos sin pisar callbacks.)
+
+Duración dinámica con start/end
+Ahora devolvéis la durationStr por defecto del TF_MAP. Podéis calcularla a partir de end-start y mapear a sufijos IB (“S/D/W/M”), p. ej.:
+
+def _ib_duration_from_range(start_iso, end_iso):
+    import pandas as pd
+    delta = pd.to_datetime(end_iso) - pd.to_datetime(start_iso)
+    secs = int(delta.total_seconds())
+    if secs <= 3600*24:        return f"{secs} S"
+    elif secs <= 3600*24*7:    return f"{secs//86400} D"
+    elif secs <= 3600*24*28:   return f"{secs//(86400*7)} W"
+    else:                      return f"{max(1, secs//(86400*30))} M"
+
+
+y en ib_hist_params:
+
+bar_size, _ = TF_MAP.get(tf, ("1 min","1800 S"))
+duration = _ib_duration_from_range(start_iso, end_iso)
+return bar_size, duration
+
+
+resolve_contract para FX y STK (detalle de exchange/currency)
+Asegura estos defaults:
+
+FX (CASH): exchange="IDEALPRO", parsear "EUR.USD" a symbol="EUR", currency="USD".
+
+STK: exchange="SMART", currency="USD".
+(Veo bien FUT y CRYPTO; revisa FX para que no dependa del punto “.” en cripto.) 
+GitHub
+
+Transmit flags en bracket (reconfirma)
+Confirma que en make_bracket_order los tres Order vayan con:
+
+Parent: transmit=False
+
+TakeProfit: transmit=False
+
+StopLoss: transmit=True
+(no vi el cuerpo completo de make_bracket_order en el diff; si ya está así, perfecto).
+
+useRTH configurable
+Dejad useRTH como parámetro en config (ibkr.market_data.hist_defaults.outside_rth) o un flag de método. Ahora está fijo a 1. 
+GitHub
+
+get_positions_blocking
+El adapter llama a get_positions_blocking(). Verifica que en tws_client.py ya esté implementado con la pareja position/positionEnd y que normalice a:
+
+{"symbol": "...", "asset_type": "...", "qty": ..., "avg_price": ..., "unrealized_pnl": ..., "currency": "..."}
+
+
+(En el diff sólo se ve la llamada desde el adapter. Si ya lo añadiste, genial; si no, completarlo ahora.) 
+GitHub
+
+DRY_RUN determinista
+En adapter.get_bars/place_bracket_order ya devolvéis mocks; si podéis, hacedlos deterministas por semilla (symbol|tf|start y plan_id) para que los tests sean 100% idempotentes.
+
+Tests que añadiría (rápidos)
+
+test_pacing_hist_calls_queue() → dos get_bars consecutivos midiendo que la segunda no se dispara antes de ~2s (o que se encola).
+
+test_duration_from_range() → start/end → durationStr esperado (“S/D/W/M”).
+
+test_fx_contract_mapping() → "EUR.USD","FX" produce CASH/IDEALPRO/EUR/USD.
+
+test_bracket_transmit_flags() → asserts sobre Order.transmit de parent/tp/sl.
+
+test_positions_blocking_shape() → que devuelve lista con claves requeridas.

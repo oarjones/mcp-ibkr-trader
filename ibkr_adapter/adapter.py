@@ -1,8 +1,10 @@
 from ibkr_adapter.tws_client import TWSClient
 from ibkr_adapter.mapping import resolve_contract
 from mcp_server.tools.utils import load_config
+from mcp_server.tools.market_data import store_realtime_market_data, RealtimeMarketData
 import pandas as pd
 from loguru import logger
+from datetime import datetime
 
 TF_MAP = {
     "1m":  ("1 min",  "1800 S"),   # 30 min
@@ -28,6 +30,20 @@ class TWSAdapter:
             port = int(ib_config.get("port", 4002))
             client_id = int(ib_config.get("client_id", 101))
             self.client.connect_and_run(host, port, client_id)
+
+    def on_order_data(self, symbol: str, price: float, timestamp: datetime, order_id: int | None = None):
+        """
+        This function is a placeholder for an IBKR API callback that provides order data.
+        It should be registered with the IBKR client to receive real-time order updates.
+        """
+        logger.info(f"Received order data: Symbol={symbol}, Price={price}, Timestamp={timestamp}, OrderID={order_id}")
+        market_data_entry = RealtimeMarketData(
+            symbol=symbol,
+            price=price,
+            timestamp=timestamp,
+            order_id=order_id
+        )
+        store_realtime_market_data(market_data_entry)
 
     def get_bars(self, symbol: str, tf: str, start: str, end: str) -> pd.DataFrame:
         if self.dry_run:

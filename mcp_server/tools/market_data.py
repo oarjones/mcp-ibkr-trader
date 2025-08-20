@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
 from enum import Enum
 import random
+from storage.db import engine, realtime_market_data
+from sqlalchemy import insert
 
 router = APIRouter()
 
@@ -46,6 +48,12 @@ class MarketDataResponse(BaseModel):
     bars: list[Bar]
     meta: dict
 
+class RealtimeMarketData(BaseModel):
+    symbol: str
+    price: float
+    timestamp: datetime
+    order_id: int | None = None
+
 def get_timeframe_delta(tf: TimeframeEnum):
     if tf == TimeframeEnum.min1:
         return timedelta(minutes=1)
@@ -55,6 +63,17 @@ def get_timeframe_delta(tf: TimeframeEnum):
         return timedelta(minutes=15)
     elif tf == TimeframeEnum.day1:
         return timedelta(days=1)
+
+def store_realtime_market_data(data: RealtimeMarketData):
+    with engine.connect() as connection:
+        stmt = insert(realtime_market_data).values(
+            symbol=data.symbol,
+            price=data.price,
+            timestamp=data.timestamp,
+            order_id=data.order_id
+        )
+        connection.execute(stmt)
+        connection.commit()
 
 @router.post("/tool/market_data.get_bars", response_model=MarketDataResponse)
 async def get_bars(request: MarketDataRequest):
