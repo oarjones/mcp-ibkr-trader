@@ -33,16 +33,14 @@ def _pace_hist(min_gap=2.0):
         _last_hist = time.time()
 
 class TWSClient(EWrapper, EClient):
-    # TODO: Consider adding a Semaphore to limit concurrent reqHistoricalData calls
-    # to avoid pacing violations (e.g., max 2 concurrent requests).
     def __init__(self):
         EClient.__init__(self, self)
         self.response_queues = {}
         self.next_valid_id = None
         self.is_connected = False
         self._id_lock = threading.Lock()
-        self._req_id = 900000  # base for reqId (separado de orderId)
-        self._end_events = {}  # reqId -> threading.Event
+        self._req_id = 900000
+        self._end_events = {}
         self._events_lock = threading.Lock()
         self._lock_subs = threading.Lock()
         self._active_mktdata_req_ids: set[int] = set()
@@ -115,9 +113,6 @@ class TWSClient(EWrapper, EClient):
         super().error(reqId, errorCode, errorString)
         friendly_message = IBKR_ERROR_MAP.get(errorCode, "Unknown IBKR error.")
         logger.error(f"IBKR Error. ReqId: {reqId}, Code: {errorCode}, Msg: {errorString}. Friendly: {friendly_message}")
-        # Optionally raise a custom exception for critical errors
-        # if errorCode in [162, 321]: # Example: raise for pacing/farm busy errors
-        #    raise IBKRError(errorCode, friendly_message, errorString)
 
     def connectionClosed(self):
         super().connectionClosed()
@@ -125,58 +120,49 @@ class TWSClient(EWrapper, EClient):
         logger.warning("IBKR connection closed.")
 
     def _resubscribe_active(self):
-        """Resubscribes to active market data and real-time bars after a reconnection."""
         mktdata_resubscribed = 0
         rtb_resubscribed = 0
         with self._lock_subs:
-            # Resubscribe market data
-            for reqId, params in list(self._active_subs["mktdata"].items()):
-                try:
-                    # Use the original reqId if possible, or generate a new one and update maps
-                    # For simplicity, let's assume we can reuse reqId for now, or generate new ones if needed.
-                    # If generating new reqIds, need to update self._active_mktdata_req_ids and self._active_subs
-                    # For now, calling super().reqMktData directly to avoid re-adding to active_subs
-                    super().reqMktData(reqId, params["contract"], params["genericTickList"], params["snapshot"], params["regulatorySnapshot"], [])
-                    mktdata_resubscribed += 1
-                except Exception as e:
-                    logger.exception(f"Failed to resubscribe market data for reqId {reqId}: {e}")
+            mktdata_subs = list(self._active_subs["mktdata"].items())
+            rtbars_subs = list(self._active_subs["rtbars"].items())
 
-            # Resubscribe real-time bars
-            for reqId, params in list(self._active_subs["rtbars"].items()):
-                try:
-                    super().reqRealTimeBars(reqId, params["contract"], params["barSize"], params["whatToShow"], params["useRTH"], params["realTimeBarsOptions"])
-                    rtb_resubscribed += 1
-                except Exception as e:
-                    logger.exception(f"Failed to resubscribe real-time bars for reqId {reqId}: {e}")
+        for reqId, params in mktdata_subs:
+            try:
+                self.reqMktData(reqId, params["contract"], params["genericTickList"], params["snapshot"], params["regulatorySnapshot"], [])
+                mktdata_resubscribed += 1
+            except Exception as e:
+                logger.exception(f"Failed to resubscribe market data for reqId {reqId}: {e}")
+
+        for reqId, params in rtbars_subs:
+            try:
+                self.reqRealTimeBars(reqId, params["contract"], params["barSize"], params["whatToShow"], params["useRTH"], params["realTimeBarsOptions"])
+                rtb_resubscribed += 1
+            except Exception as e:
+                logger.exception(f"Failed to resubscribe real-time bars for reqId {reqId}: {e}")
         logger.info(f"Resubscribed {mktdata_resubscribed} market data streams and {rtb_resubscribed} real-time bars streams.")
 
     def disconnect(self):
-        # 1) Cancelar suscripciones RT activas
         mktdata_cancelled = 0
         rtb_cancelled = 0
-        with self._lock_subs:
-            for reqId in list(self._active_mktdata_req_ids):
-                try:
-                    super().cancelMktData(reqId)
-                    mktdata_cancelled += 1
-                except Exception as e:
-                    logger.exception(f"Error cancelling market data subscription {reqId}: {e}")
-            self._active_mktdata_req_ids.clear()
-            self._active_subs["mktdata"].clear()
+        
+        mkt_reqs = list(self._active_mktdata_req_ids)
+        rtb_reqs = list(self._active_rtb_req_ids)
 
-            for reqId in list(self._active_rtb_req_ids):
-                try:
-                    super().cancelRealTimeBars(reqId)
-                    rtb_cancelled += 1
-                except Exception as e:
-                    logger.exception(f"Error cancelling real-time bars subscription {reqId}: {e}")
-            self._active_rtb_req_ids.clear()
-            self._active_subs["rtbars"].clear()
+        for reqId in mkt_reqs:
+            try:
+                self.cancelMktData(reqId)
+                mktdata_cancelled += 1
+            except Exception as e:
+                logger.exception(f"Error cancelling market data subscription {reqId}: {e}")
+
+        for reqId in rtb_reqs:
+            try:
+                self.cancelRealTimeBars(reqId)
+                rtb_cancelled += 1
+            except Exception as e:
+                logger.exception(f"Error cancelling real-time bars subscription {reqId}: {e}")
 
         logger.info(f"Cancelled {mktdata_cancelled} market data subscriptions and {rtb_cancelled} real-time bars subscriptions on disconnect.")
-        # 2) Cancelar históricos pendientes si llevas registro (opcional)
-        # (No se requiere aquí ya que get_historical_data ya maneja su propia cancelación)
-        # 3) Llamar a EClient.disconnect()
         super().disconnect()
 
     def connect_and_run(self, host, port, clientId):
@@ -185,7 +171,6 @@ class TWSClient(EWrapper, EClient):
         thread.daemon = True
         thread.start()
         
-        # Wait for connection to be established
         for i in range(20):
             if self.is_connected:
                 break
@@ -215,7 +200,7 @@ class TWSClient(EWrapper, EClient):
 
     def historicalDataEnd(self, reqId, start, end):
         super().historicalDataEnd(reqId, start, end)
-        self.get_response_queue(reqId)  # ensure queue exists
+        self.get_response_queue(reqId)
         with self._events_lock:
             ev = self._end_events.get(reqId)
         if ev: ev.set()
@@ -255,7 +240,6 @@ class TWSClient(EWrapper, EClient):
             with self._events_lock:
                 if reqId in self._end_events:
                     del self._end_events[reqId]
-            # Drain the queue to prevent memory leaks
             while not q.empty():
                 try:
                     q.get_nowait()
@@ -326,14 +310,12 @@ class TWSClient(EWrapper, EClient):
         q = Queue()
         end_marker = object()
 
-        # Define handlers as closures to capture the queue instance
         def position_handler(account, contract, pos, avgCost):
             q.put((account, contract, pos, avgCost))
 
         def position_end_handler():
             q.put(end_marker)
 
-        # Temporarily hook the handlers
         original_position_handler = self.position
         original_position_end_handler = self.positionEnd
         self.position = position_handler
@@ -362,11 +344,10 @@ class TWSClient(EWrapper, EClient):
                     "asset_type": contract.secType,
                     "qty": pos,
                     "avg_price": avg_cost,
-                    "unrealized_pnl": None, # Not directly available from position callback
+                    "unrealized_pnl": None,
                     "currency": contract.currency
                 })
         finally:
-            # Restore original handlers
             self.position = original_position_handler
             self.positionEnd = original_position_end_handler
             
