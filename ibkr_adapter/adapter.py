@@ -114,6 +114,17 @@ class TWSAdapter:
             })
 
         df = pd.DataFrame(rows).dropna(subset=["ts"]).sort_values("ts").reset_index(drop=True)
+        
+        # Ensure correct dtypes
+        numeric_cols = ["open", "high", "low", "close", "volume"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Ensure timestamp is tz-naive
+        if 'ts' in df.columns:
+            df['ts'] = pd.to_datetime(df['ts']).dt.tz_localize(None)
+
         return df
 
     def place_bracket_order(self, symbol: str, asset_type: str, qty: int, side: str,

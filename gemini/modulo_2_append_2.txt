@@ -1,0 +1,30 @@
+Nits y micro-mejoras (si quieres dejarlo “de hierro”)
+
+1. Thread-safety del diccionario de eventos
+Accesos a self._end_events (alta/baja/lookup) protégelos con un lock pequeño para evitar rarezas en alta concurrencia:
+Crear/eliminar self._end_events[reqId] dentro de un with self._events_lock:.
+En historicalDataEnd, leer con el mismo lock.
+
+2.Limpieza en timeouts/errores
+Cuando haces cancelHistoricalData(reqId) por timeout, haz un finally que siempre elimine la entrada de self._end_events y drene la cola asociada a ese reqId para no “dejar basura” en memoria.
+
+3. Colas con tamaño
+Define Queue(maxsize=…​) (p.ej. 10–100) por reqId para evitar crecimiento sin control si IB envía más mensajes de los esperados o si un consumidor se queda bloqueado.
+
+4. Desuscripciones/teardown
+Si exponéis reqRealTimeBars/reqMktData (aunque sea más tarde), documentad y codificad los cancel* en disconnect() para no dejar suscripciones vivas tras un reconnect.
+
+5.Normalización FX/STK (por si acaso)
+Verificad que mapping hace:
+FX: secType="CASH", exchange="IDEALPRO", y EUR.USD → symbol="EUR", currency="USD".
+STK: secType="STK", exchange="SMART", currency="USD".
+
+
+6. Tipos/dtypes en get_bars
+Asegura df.dtypes numéricos (float64/int64) y ts con tz-naive o UTC consistente. Es trivial pero ahorra sorpresas en el Módulo 3 (ATR).
+
+7. Errores IB “amigables”
+Añade un map para códigos comunes (10167 permisos MD, 200 secdef, 162 farm busy, 321 pacing) → excepción propia con mensaje claro. Útil para diagnósticos.
+
+8. RTH/Outside RTH
+Ya tomas outside_rth de config; documenta en README que outside_rth: true ⇒ useRTH=0. Es una duda habitual.

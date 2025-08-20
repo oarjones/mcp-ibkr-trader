@@ -5,6 +5,21 @@ from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from loguru import logger
 
+class IBKRError(Exception):
+    """Custom exception for IBKR errors."""
+    def __init__(self, code: int, message: str, original_error: str = None):
+        self.code = code
+        self.message = message
+        self.original_error = original_error
+        super().__init__(f"IBKR Error {code}: {message} (Original: {original_error})")
+
+IBKR_ERROR_MAP = {
+    10167: "Permissions error: Market data not subscribed.",
+    200: "Security definition error: Contract not found or invalid.",
+    162: "Farm busy: Request throttled by IBKR.",
+    321: "Pacing violation: Too many requests in a short period.",
+}
+
 _hist_lock = threading.Lock()
 _last_hist = 0.0
 
@@ -26,6 +41,7 @@ class TWSClient(EWrapper, EClient):
         self._id_lock = threading.Lock()
         self._req_id = 900000  # base for reqId (separado de orderId)
         self._end_events = {}  # reqId -> threading.Event
+        self._events_lock = threading.Lock()
 
     def _next_req_id(self):
         with self._id_lock:
@@ -48,12 +64,20 @@ class TWSClient(EWrapper, EClient):
 
     def error(self, reqId, errorCode, errorString):
         super().error(reqId, errorCode, errorString)
-        logger.error(f"IBKR Error. ReqId: {reqId}, Code: {errorCode}, Msg: {errorString}")
+        friendly_message = IBKR_ERROR_MAP.get(errorCode, "Unknown IBKR error.")
+        logger.error(f"IBKR Error. ReqId: {reqId}, Code: {errorCode}, Msg: {errorString}. Friendly: {friendly_message}")
+        # Optionally raise a custom exception for critical errors
+        # if errorCode in [162, 321]: # Example: raise for pacing/farm busy errors
+        #    raise IBKRError(errorCode, friendly_message, errorString)
 
     def connectionClosed(self):
         super().connectionClosed()
         self.is_connected = False
         logger.warning("IBKR connection closed.")
+
+    def disconnect(self):
+        # TODO: Implement cancellation of real-time data subscriptions (e.g., cancelMktData, cancelRealTimeBars)
+        super().disconnect()
 
     def connect_and_run(self, host, port, clientId):
         self.connect(host, port, clientId)
@@ -72,7 +96,7 @@ class TWSClient(EWrapper, EClient):
 
     def get_response_queue(self, reqId):
         if reqId not in self.response_queues:
-            self.response_queues[reqId] = Queue()
+            self.response_queues[reqId] = Queue(maxsize=100)
         return self.response_queues[reqId]
 
     def wait_for_response(self, reqId, timeout=5):
@@ -88,7 +112,8 @@ class TWSClient(EWrapper, EClient):
     def historicalDataEnd(self, reqId, start, end):
         super().historicalDataEnd(reqId, start, end)
         self.get_response_queue(reqId)  # ensure queue exists
-        ev = self._end_events.get(reqId)
+        with self._events_lock:
+            ev = self._end_events.get(reqId)
         if ev: ev.set()
 
     def get_historical_data(self, contract, endDateTime, durationStr, barSizeSetting,
@@ -97,25 +122,36 @@ class TWSClient(EWrapper, EClient):
         q = self.get_response_queue(reqId)
         bars = []
         done = threading.Event()
-        self._end_events[reqId] = done
+        with self._events_lock:
+            self._end_events[reqId] = done
 
-        _pace_hist()
-        self.reqHistoricalData(reqId, contract, endDateTime, durationStr,
-                               barSizeSetting, whatToShow, useRTH, 1, False, [])
+        try:
+            _pace_hist()
+            self.reqHistoricalData(reqId, contract, endDateTime, durationStr,
+                                   barSizeSetting, whatToShow, useRTH, 1, False, [])
 
-        start_time = time.time()
-        while True:
-            if done.is_set(): break
-            remaining = timeout - (time.time() - start_time)
-            if remaining <= 0:
-                self.cancelHistoricalData(reqId)
-                raise TimeoutError(f"historicalData timeout for reqId={reqId}")
-            try:
-                item = q.get(timeout=min(remaining, 0.25))
-                bars.append(item)
-            except Empty:
-                pass
-        del self._end_events[reqId]
+            start_time = time.time()
+            while True:
+                if done.is_set(): break
+                remaining = timeout - (time.time() - start_time)
+                if remaining <= 0:
+                    self.cancelHistoricalData(reqId)
+                    raise TimeoutError(f"historicalData timeout for reqId={reqId}")
+                try:
+                    item = q.get(timeout=min(remaining, 0.25))
+                    bars.append(item)
+                except Empty:
+                    pass
+        finally:
+            with self._events_lock:
+                if reqId in self._end_events:
+                    del self._end_events[reqId]
+            # Drain the queue to prevent memory leaks
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                except Empty:
+                    break
         return bars
 
     def openOrder(self, orderId, contract, order, orderState):
