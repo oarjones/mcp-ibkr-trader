@@ -70,7 +70,7 @@ class TWSAdapter:
                 "high": [random.uniform(100, 120), random.uniform(100, 120)],
                 "low": [random.uniform(80, 100), random.uniform(80, 100)],
                 "close": [random.uniform(90, 110), random.uniform(90, 110)],
-                "volume": [random.randint(500, 1500), random.randint(500, 1500)],
+                "volume": pd.Series([random.randint(500, 1500), random.randint(500, 1500)], dtype="Int64"),
             })
 
         # asset_type = self._infer_asset_type(symbol) # Optional, assuming STK for now
@@ -116,14 +116,19 @@ class TWSAdapter:
         df = pd.DataFrame(rows).dropna(subset=["ts"]).sort_values("ts").reset_index(drop=True)
         
         # Ensure correct dtypes
-        numeric_cols = ["open", "high", "low", "close", "volume"]
+        numeric_cols = ["open", "high", "low", "close"]
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Ensure timestamp is tz-naive
+        # Ensure volume is int64, coercing errors
+        if 'volume' in df.columns:
+            df["volume"] = pd.to_numeric(df["volume"], errors='coerce').astype("Int64") # Use Int64 for nullable integer
+
+        # Ensure timestamp is tz-naive datetime64
         if 'ts' in df.columns:
-            df['ts'] = pd.to_datetime(df['ts']).dt.tz_localize(None)
+            df['ts'] = pd.to_datetime(df['ts']).dt.tz_localize(None) # Ensure tz-naive
+            df['ts'] = df['ts'].astype("datetime64[ns]")
 
         return df
 

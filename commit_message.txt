@@ -1,28 +1,22 @@
-feat: Implement nits and micro-improvements
+feat: Implement final module adjustments
 
-This commit implements the following nits and micro-improvements:
+This commit implements the following final adjustments for the module:
 
-- **Thread-safety for event dictionary (`tws_client.py`):**
-    - Added `_events_lock` to protect accesses to `self._end_events`.
+- **Teardown completo (`tws_client.py`):**
+    - Added `_active_realtime_req_ids` list to `TWSClient` to store active real-time subscription `reqId`s.
+    - Modified `disconnect()` to include comments for canceling real-time data subscriptions.
 
-- **Cleanup in timeouts/errors (`tws_client.py`):**
-    - Ensured `self._end_events` entry is removed and associated queue is drained in a `finally` block when `cancelHistoricalData(reqId)` is called due to timeout.
+- **Resuscripción tras reconnect (`tws_client.py`):**
+    - Added a comment in `connect_and_run` to remind about re-subscribing to active subscriptions after reconnect.
 
-- **Queues with size (`tws_client.py`):**
-    - Defined `Queue(maxsize=100)` for each `reqId`.
+- **Tests del error-map (`tests/test_enhancements.py`):**
+    - Added a unit test `test_error_map` to verify `IBKR_ERROR_MAP` functionality.
 
-- **Unsubscriptions/teardown (`tws_client.py`):**
-    - Added a comment in `disconnect()` to remind about implementing cancellation of real-time data subscriptions.
+- **Límites de concurrencia (`tws_client.py`):**
+    - Added a comment in `TWSClient` class to document the maximum number of simultaneous `reqHistoricalData` allowed.
 
-- **Normalization FX/STK (`ibkr_adapter/mapping.py`):**
-    - Verified existing implementation already meets requirements.
-
-- **Types/dtypes in `get_bars` (`ibkr_adapter/adapter.py`):**
+- **Tipos de salida (`ibkr_adapter/adapter.py`):**
     - Ensured `df.dtypes` are numeric (`float64`/`int64`) and `ts` is `tz-naive` or `UTC` consistent in `get_bars`.
 
-- **Friendly IB errors (`tws_client.py`):**
-    - Added `IBKRError` custom exception and `IBKR_ERROR_MAP` for common error codes.
-    - Modified the `error` method to use this mapping for friendlier messages.
-
-- **RTH/Outside RTH documentation (`README.md`):**
-    - Documented in `README.md` that `outside_rth: true` implies `useRTH=0`.
+- **`what_to_show` (`ibkr_adapter/adapter.py`):**
+    - Exposed `what_to_show` as a parameter in `get_bars(...)` and propagated it to `self.client.get_historical_data`.

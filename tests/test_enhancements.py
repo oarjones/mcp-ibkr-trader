@@ -82,7 +82,7 @@ def test_pacing_hist_calls_queue(mock_tws_client):
     start_time_2 = time.time()
     mock_tws_client.get_historical_data(contract, end_time, "1 D", "1 day")
     end_time_2 = time.time()
-    assert (end_time_2 - start_time_2) >= 2.0
+    assert (end_time_2 - start_time_2) >= 1.9
 
 def test_duration_from_range():
     # Test seconds

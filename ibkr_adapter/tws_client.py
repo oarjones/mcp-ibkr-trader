@@ -44,7 +44,14 @@ class TWSClient(EWrapper, EClient):
         self._req_id = 900000  # base for reqId (separado de orderId)
         self._end_events = {}  # reqId -> threading.Event
         self._events_lock = threading.Lock()
-        self._active_realtime_req_ids = [] # To store reqIds of active real-time subscriptions
+        self._lock_subs = threading.Lock()
+        self._active_mktdata_req_ids: set[int] = set()
+        self._active_rtb_req_ids: set[int] = set()
+        self._active_subs: dict[str, dict[int, dict]] = {
+            "mktdata": {},
+            "rtbars": {}
+        }
+        self._hist_sem = threading.Semaphore(value=2)
 
     def _next_req_id(self):
         with self._id_lock:
@@ -58,6 +65,45 @@ class TWSClient(EWrapper, EClient):
             oid = self.next_valid_id
             self.next_valid_id += 1
             return oid
+
+    def reqMktData(self, reqId, contract, genericTickList, snapshot, regulatorySnapshot, mktDataOptions):
+        super().reqMktData(reqId, contract, genericTickList, snapshot, regulatorySnapshot, mktDataOptions)
+        with self._lock_subs:
+            self._active_mktdata_req_ids.add(reqId)
+            self._active_subs["mktdata"][reqId] = {
+                "contract": contract,
+                "genericTickList": genericTickList,
+                "snapshot": snapshot,
+                "regulatorySnapshot": regulatorySnapshot
+            }
+
+    def cancelMktData(self, reqId: int):
+        super().cancelMktData(reqId)
+        with self._lock_subs:
+            if reqId in self._active_mktdata_req_ids:
+                self._active_mktdata_req_ids.remove(reqId)
+            if reqId in self._active_subs["mktdata"]:
+                del self._active_subs["mktdata"][reqId]
+
+    def reqRealTimeBars(self, reqId, contract, barSize, whatToShow, useRTH, realTimeBarsOptions):
+        super().reqRealTimeBars(reqId, contract, barSize, whatToShow, useRTH, realTimeBarsOptions)
+        with self._lock_subs:
+            self._active_rtb_req_ids.add(reqId)
+            self._active_subs["rtbars"][reqId] = {
+                "contract": contract,
+                "barSize": barSize,
+                "whatToShow": whatToShow,
+                "useRTH": useRTH,
+                "realTimeBarsOptions": realTimeBarsOptions
+            }
+
+    def cancelRealTimeBars(self, reqId: int):
+        super().cancelRealTimeBars(reqId)
+        with self._lock_subs:
+            if reqId in self._active_rtb_req_ids:
+                self._active_rtb_req_ids.remove(reqId)
+            if reqId in self._active_subs["rtbars"]:
+                del self._active_subs["rtbars"][reqId]
 
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
@@ -78,13 +124,59 @@ class TWSClient(EWrapper, EClient):
         self.is_connected = False
         logger.warning("IBKR connection closed.")
 
+    def _resubscribe_active(self):
+        """Resubscribes to active market data and real-time bars after a reconnection."""
+        mktdata_resubscribed = 0
+        rtb_resubscribed = 0
+        with self._lock_subs:
+            # Resubscribe market data
+            for reqId, params in list(self._active_subs["mktdata"].items()):
+                try:
+                    # Use the original reqId if possible, or generate a new one and update maps
+                    # For simplicity, let's assume we can reuse reqId for now, or generate new ones if needed.
+                    # If generating new reqIds, need to update self._active_mktdata_req_ids and self._active_subs
+                    # For now, calling super().reqMktData directly to avoid re-adding to active_subs
+                    super().reqMktData(reqId, params["contract"], params["genericTickList"], params["snapshot"], params["regulatorySnapshot"], [])
+                    mktdata_resubscribed += 1
+                except Exception as e:
+                    logger.exception(f"Failed to resubscribe market data for reqId {reqId}: {e}")
+
+            # Resubscribe real-time bars
+            for reqId, params in list(self._active_subs["rtbars"].items()):
+                try:
+                    super().reqRealTimeBars(reqId, params["contract"], params["barSize"], params["whatToShow"], params["useRTH"], params["realTimeBarsOptions"])
+                    rtb_resubscribed += 1
+                except Exception as e:
+                    logger.exception(f"Failed to resubscribe real-time bars for reqId {reqId}: {e}")
+        logger.info(f"Resubscribed {mktdata_resubscribed} market data streams and {rtb_resubscribed} real-time bars streams.")
+
     def disconnect(self):
-        # Cancel any active real-time data subscriptions
-        for reqId in self._active_realtime_req_ids:
-            # self.cancelMktData(reqId) # Example for market data
-            # self.cancelRealTimeBars(reqId) # Example for real-time bars
-            pass # Placeholder for actual cancellation logic
-        self._active_realtime_req_ids.clear()
+        # 1) Cancelar suscripciones RT activas
+        mktdata_cancelled = 0
+        rtb_cancelled = 0
+        with self._lock_subs:
+            for reqId in list(self._active_mktdata_req_ids):
+                try:
+                    super().cancelMktData(reqId)
+                    mktdata_cancelled += 1
+                except Exception as e:
+                    logger.exception(f"Error cancelling market data subscription {reqId}: {e}")
+            self._active_mktdata_req_ids.clear()
+            self._active_subs["mktdata"].clear()
+
+            for reqId in list(self._active_rtb_req_ids):
+                try:
+                    super().cancelRealTimeBars(reqId)
+                    rtb_cancelled += 1
+                except Exception as e:
+                    logger.exception(f"Error cancelling real-time bars subscription {reqId}: {e}")
+            self._active_rtb_req_ids.clear()
+            self._active_subs["rtbars"].clear()
+
+        logger.info(f"Cancelled {mktdata_cancelled} market data subscriptions and {rtb_cancelled} real-time bars subscriptions on disconnect.")
+        # 2) Cancelar históricos pendientes si llevas registro (opcional)
+        # (No se requiere aquí ya que get_historical_data ya maneja su propia cancelación)
+        # 3) Llamar a EClient.disconnect()
         super().disconnect()
 
     def connect_and_run(self, host, port, clientId):
@@ -101,8 +193,10 @@ class TWSClient(EWrapper, EClient):
         
         if not self.is_connected:
             raise ConnectionError("Could not connect to IBKR.")
-        # TODO: If real-time subscriptions are implemented, re-subscribe to active subscriptions here
-        # (e.g., by iterating through a stored list of active subscriptions and calling reqMktData/reqRealTimeBars)
+        try:
+            self._resubscribe_active()
+        except Exception as e:
+            logger.exception("Failed to resubscribe active streams: %s", e)
 
     def get_response_queue(self, reqId):
         if reqId not in self.response_queues:
@@ -135,6 +229,10 @@ class TWSClient(EWrapper, EClient):
         with self._events_lock:
             self._end_events[reqId] = done
 
+        acquired = self._hist_sem.acquire(timeout=timeout)
+        if not acquired:
+            raise TimeoutError("Historical semaphore acquire timeout")
+
         try:
             _pace_hist()
             self.reqHistoricalData(reqId, contract, endDateTime, durationStr,
@@ -153,6 +251,7 @@ class TWSClient(EWrapper, EClient):
                 except Empty:
                     pass
         finally:
+            self._hist_sem.release()
             with self._events_lock:
                 if reqId in self._end_events:
                     del self._end_events[reqId]
