@@ -5,6 +5,18 @@ from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from loguru import logger
 
+_hist_lock = threading.Lock()
+_last_hist = 0.0
+
+def _pace_hist(min_gap=2.0):
+    global _last_hist
+    with _hist_lock:
+        now = time.time()
+        delay = _last_hist + min_gap - now
+        if delay > 0:
+            time.sleep(delay)
+        _last_hist = time.time()
+
 class TWSClient(EWrapper, EClient):
     def __init__(self):
         EClient.__init__(self, self)
@@ -13,6 +25,7 @@ class TWSClient(EWrapper, EClient):
         self.is_connected = False
         self._id_lock = threading.Lock()
         self._req_id = 900000  # base for reqId (separado de orderId)
+        self._end_events = {}  # reqId -> threading.Event
 
     def _next_req_id(self):
         with self._id_lock:
@@ -73,48 +86,36 @@ class TWSClient(EWrapper, EClient):
         self.get_response_queue(reqId).put(bar)
 
     def historicalDataEnd(self, reqId, start, end):
-        self.get_response_queue(reqId).put(None) # Signal end of data
+        super().historicalDataEnd(reqId, start, end)
+        self.get_response_queue(reqId)  # ensure queue exists
+        ev = self._end_events.get(reqId)
+        if ev: ev.set()
 
     def get_historical_data(self, contract, endDateTime, durationStr, barSizeSetting,
-                        whatToShow="TRADES", useRTH=1, timeout=15.0):
-        reqId = self._next_req_id()  # thread-safe
+                        whatToShow="TRADES", useRTH: int = 1, timeout=15.0):
+        reqId = self._next_req_id()
         q = self.get_response_queue(reqId)
         bars = []
+        done = threading.Event()
+        self._end_events[reqId] = done
 
-        # emitir petición
+        _pace_hist()
         self.reqHistoricalData(reqId, contract, endDateTime, durationStr,
                                barSizeSetting, whatToShow, useRTH, 1, False, [])
-        # recopilar hasta 'historicalDataEnd'
-        end_marker = object()
-        def _on_end(_reqId, _start, _end):
-            if _reqId == reqId:
-                q.put(end_marker)
-
-        # hook temporal:
-        orig_end = getattr(self, "historicalDataEnd")
-        def wrap_end(_reqId, _start, _end):
-            _on_end(_reqId, _start, _end)
-            orig_end(_reqId, _start, _end)
-        self.historicalDataEnd = wrap_end  # monkey patch simple (o usa señales propias)
 
         start_time = time.time()
         while True:
+            if done.is_set(): break
             remaining = timeout - (time.time() - start_time)
             if remaining <= 0:
                 self.cancelHistoricalData(reqId)
                 raise TimeoutError(f"historicalData timeout for reqId={reqId}")
             try:
-                item = q.get(timeout=remaining)
+                item = q.get(timeout=min(remaining, 0.25))
+                bars.append(item)
             except Empty:
-                self.cancelHistoricalData(reqId)
-                raise TimeoutError(f"historicalData timeout for reqId={reqId}")
-
-            if item is end_marker:
-                break
-            bars.append(item)
-
-        # restaurar callback original
-        self.historicalDataEnd = orig_end
+                pass
+        del self._end_events[reqId]
         return bars
 
     def openOrder(self, orderId, contract, order, orderState):
@@ -215,7 +216,9 @@ class TWSClient(EWrapper, EClient):
                     "symbol": contract.symbol,
                     "asset_type": contract.secType,
                     "qty": pos,
-                    "avg_price": avg_cost
+                    "avg_price": avg_cost,
+                    "unrealized_pnl": None, # Not directly available from position callback
+                    "currency": contract.currency
                 })
         finally:
             # Restore original handlers
