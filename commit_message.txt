@@ -1,36 +1,28 @@
-feat: Implement additional refinements and new tests
+feat: Implement nits and micro-improvements
 
-This commit includes the following refinements and new tests:
+This commit implements the following nits and micro-improvements:
 
-- **Pacing rules (históricos) in `tws_client.py`:**
-    - Added `_hist_lock` and `_last_hist` module-level variables.
-    - Implemented `_pace_hist` function to enforce a minimum gap between historical data requests.
-    - Called `_pace_hist()` before `reqHistoricalData` in `TWSClient.get_historical_data`.
+- **Thread-safety for event dictionary (`tws_client.py`):**
+    - Added `_events_lock` to protect accesses to `self._end_events`.
 
-- **`historicalDataEnd` without monkey-patching in `tws_client.py`:**
-    - Modified `TWSClient` to use `self._end_events` (a dictionary of `threading.Event` objects) for managing historical data request completion.
-    - Updated `get_historical_data` to use this event-based synchronization.
-    - Modified `historicalDataEnd` to set the corresponding `threading.Event` when data ends.
+- **Cleanup in timeouts/errors (`tws_client.py`):**
+    - Ensured `self._end_events` entry is removed and associated queue is drained in a `finally` block when `cancelHistoricalData(reqId)` is called due to timeout.
 
-- **Dynamic duration with start/end in `ib_hist_params`:**
-    - Implemented `_ib_duration_from_range` function in `ibkr_adapter/adapter.py` to calculate `durationStr` dynamically.
-    - Modified `ib_hist_params` to use this new function.
+- **Queues with size (`tws_client.py`):**
+    - Defined `Queue(maxsize=100)` for each `reqId`.
 
-- **`resolve_contract` for FX and STK:**
-    - Verified existing implementation in `ibkr_adapter/mapping.py` already meets requirements.
+- **Unsubscriptions/teardown (`tws_client.py`):**
+    - Added a comment in `disconnect()` to remind about implementing cancellation of real-time data subscriptions.
 
-- **Transmit flags in bracket orders:**
-    - Verified `make_bracket_order` in `ibkr_adapter/tws_client.py` already sets `transmit` flags correctly.
+- **Normalization FX/STK (`ibkr_adapter/mapping.py`):**
+    - Verified existing implementation already meets requirements.
 
-- **`useRTH` configurable:**
-    - Modified `TWSClient.get_historical_data` to accept `useRTH` as a parameter.
-    - Modified `TWSAdapter.get_bars` to pass `useRTH` from config or method parameter.
+- **Types/dtypes in `get_bars` (`ibkr_adapter/adapter.py`):**
+    - Ensured `df.dtypes` are numeric (`float64`/`int64`) and `ts` is `tz-naive` or `UTC` consistent in `get_bars`.
 
-- **`get_positions_blocking`:**
-    - Modified `TWSClient.get_positions_blocking` in `ibkr_adapter/tws_client.py` to include `currency` and `unrealized_pnl` in the output.
+- **Friendly IB errors (`tws_client.py`):**
+    - Added `IBKRError` custom exception and `IBKR_ERROR_MAP` for common error codes.
+    - Modified the `error` method to use this mapping for friendlier messages.
 
-- **`DRY_RUN` deterministic:**
-    - Modified `TWSAdapter.get_bars` and `TWSAdapter.place_bracket_order` in `ibkr_adapter/adapter.py` to use deterministic `random.seed()` for reproducible mock data.
-
-- **New tests:**
-    - Added `tests/test_enhancements.py` with new tests for pacing, dynamic duration, FX contract mapping, bracket transmit flags, and positions blocking shape.
+- **RTH/Outside RTH documentation (`README.md`):**
+    - Documented in `README.md` that `outside_rth: true` implies `useRTH=0`.

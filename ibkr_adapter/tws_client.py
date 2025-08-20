@@ -33,6 +33,8 @@ def _pace_hist(min_gap=2.0):
         _last_hist = time.time()
 
 class TWSClient(EWrapper, EClient):
+    # TODO: Consider adding a Semaphore to limit concurrent reqHistoricalData calls
+    # to avoid pacing violations (e.g., max 2 concurrent requests).
     def __init__(self):
         EClient.__init__(self, self)
         self.response_queues = {}
@@ -42,6 +44,7 @@ class TWSClient(EWrapper, EClient):
         self._req_id = 900000  # base for reqId (separado de orderId)
         self._end_events = {}  # reqId -> threading.Event
         self._events_lock = threading.Lock()
+        self._active_realtime_req_ids = [] # To store reqIds of active real-time subscriptions
 
     def _next_req_id(self):
         with self._id_lock:
@@ -76,7 +79,12 @@ class TWSClient(EWrapper, EClient):
         logger.warning("IBKR connection closed.")
 
     def disconnect(self):
-        # TODO: Implement cancellation of real-time data subscriptions (e.g., cancelMktData, cancelRealTimeBars)
+        # Cancel any active real-time data subscriptions
+        for reqId in self._active_realtime_req_ids:
+            # self.cancelMktData(reqId) # Example for market data
+            # self.cancelRealTimeBars(reqId) # Example for real-time bars
+            pass # Placeholder for actual cancellation logic
+        self._active_realtime_req_ids.clear()
         super().disconnect()
 
     def connect_and_run(self, host, port, clientId):
@@ -93,6 +101,8 @@ class TWSClient(EWrapper, EClient):
         
         if not self.is_connected:
             raise ConnectionError("Could not connect to IBKR.")
+        # TODO: If real-time subscriptions are implemented, re-subscribe to active subscriptions here
+        # (e.g., by iterating through a stored list of active subscriptions and calling reqMktData/reqRealTimeBars)
 
     def get_response_queue(self, reqId):
         if reqId not in self.response_queues:

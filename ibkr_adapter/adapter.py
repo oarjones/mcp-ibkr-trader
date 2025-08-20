@@ -59,7 +59,7 @@ class TWSAdapter:
         )
         store_realtime_market_data(market_data_entry)
 
-    def get_bars(self, symbol: str, tf: str, start: str, end: str, use_rth: int | None = None) -> pd.DataFrame:
+    def get_bars(self, symbol: str, tf: str, start: str, end: str, use_rth: int | None = None, what_to_show: str = "TRADES") -> pd.DataFrame:
         if self.dry_run:
             logger.info("Dry run mode: returning mock data for get_bars")
             seed = f"{symbol}-{tf}-{start}"
@@ -93,7 +93,7 @@ class TWSAdapter:
             endDateTime=end_dt_str,
             durationStr=duration,
             barSizeSetting=bar_size,
-            whatToShow="TRADES",
+            whatToShow=what_to_show,
             useRTH=use_rth_val, 
             timeout=20
         )

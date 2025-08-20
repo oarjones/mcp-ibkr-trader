@@ -183,3 +183,18 @@ def test_positions_blocking_shape(tws_adapter):
         # unrealized_pnl can be None or float
         assert pos["unrealized_pnl"] is None or isinstance(pos["unrealized_pnl"], (int, float))
         assert isinstance(pos["currency"], str)
+
+def test_error_map(mock_tws_client):
+    from ibkr_adapter.tws_client import IBKRError, IBKR_ERROR_MAP
+
+    # Test a mapped error code
+    with patch('loguru.logger.error') as mock_logger_error:
+        mock_tws_client.error(reqId=1, errorCode=10167, errorString="Market data not subscribed to.")
+        mock_logger_error.assert_called_once()
+        assert "Permissions error: Market data not subscribed." in mock_logger_error.call_args[0][0]
+
+    # Test an unmapped error code
+    with patch('loguru.logger.error') as mock_logger_error:
+        mock_tws_client.error(reqId=2, errorCode=999, errorString="Some unknown error.")
+        mock_logger_error.assert_called_once()
+        assert "Unknown IBKR error." in mock_logger_error.call_args[0][0]
